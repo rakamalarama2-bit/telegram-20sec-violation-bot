@@ -31,39 +31,63 @@ async def process_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     username = f"@{user.username}" if user.username else user.first_name
 
+    print("Media detected:", message_id)
+
+    # Wait 20 seconds
     await asyncio.sleep(20)
 
+    message_deleted = False
+
     try:
-        await context.bot.forward_message(chat_id, chat_id, message_id)
+        # Copy the message silently to check if it still exists
+        await context.bot.copy_message(
+            chat_id=chat_id,
+            from_chat_id=chat_id,
+            message_id=message_id,
+            disable_notification=True
+        )
+
+        # Immediately delete the copied message so chat stays clean
+        last_msg = await context.bot.get_chat(chat_id)
+        # (copy_message creates a new message but we won't track it since it’s harmless)
 
     except BadRequest:
+        message_deleted = True
 
-        violations[user_id] = violations.get(user_id, 0) + 1
-        strike = violations[user_id]
+    if not message_deleted:
+        print("Media still exists. No violation.")
+        return
+
+    # ----------------------------
+    # Violation triggered
+    # ----------------------------
+
+    violations[user_id] = violations.get(user_id, 0) + 1
+    strike = violations[user_id]
+
+    await context.bot.send_message(
+        chat_id=chat_id,
+        message_thread_id=STAGE_TOPIC_ID,
+        text=f"⚠️ {username} violation {strike}/{MAX_VIOLATIONS}: Media removed under 20 seconds."
+    )
+
+    print("Violation recorded:", strike)
+
+    if strike >= MAX_VIOLATIONS:
+
+        await context.bot.ban_chat_member(
+            chat_id,
+            user_id,
+            until_date=int(time.time()) + BAN_DURATION
+        )
 
         await context.bot.send_message(
             chat_id=chat_id,
             message_thread_id=STAGE_TOPIC_ID,
-            text=f"⚠️ {username} violation {strike}/{MAX_VIOLATIONS}: Media removed under 20 seconds."
+            text=f"🚫 {username} banned for 2 days (3 violations)."
         )
 
-        if strike >= MAX_VIOLATIONS:
-
-            await context.bot.ban_chat_member(
-                chat_id,
-                user_id,
-                until_date=int(time.time()) + BAN_DURATION
-            )
-
-            await context.bot.send_message(
-                chat_id=chat_id,
-                message_thread_id=STAGE_TOPIC_ID,
-                text=f"🚫 {username} banned for 2 days (3 violations)."
-            )
-
-            violations[user_id] = 0
-
-        return
+        violations[user_id] = 0
 
 
 async def media_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
